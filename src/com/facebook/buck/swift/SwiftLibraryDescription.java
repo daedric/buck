@@ -22,17 +22,18 @@ import com.facebook.buck.cxx.CxxLibrary;
 import com.facebook.buck.cxx.CxxLibraryDescription;
 import com.facebook.buck.cxx.CxxLinkableEnhancer;
 import com.facebook.buck.cxx.CxxPlatform;
+import com.facebook.buck.cxx.HeaderVisibility;
 import com.facebook.buck.cxx.Linker;
 import com.facebook.buck.cxx.LinkerMapMode;
 import com.facebook.buck.cxx.NativeLinkable;
 import com.facebook.buck.cxx.NativeLinkableInput;
 import com.facebook.buck.model.BuildTarget;
-import com.facebook.buck.model.BuildTargets;
 import com.facebook.buck.model.Flavor;
 import com.facebook.buck.model.FlavorConvertible;
 import com.facebook.buck.model.FlavorDomain;
 import com.facebook.buck.model.Flavored;
 import com.facebook.buck.model.ImmutableFlavor;
+import com.facebook.buck.model.UnflavoredBuildTarget;
 import com.facebook.buck.parser.NoSuchBuildTargetException;
 import com.facebook.buck.rules.AbstractDescriptionArg;
 import com.facebook.buck.rules.BuildRule;
@@ -50,8 +51,8 @@ import com.facebook.infer.annotation.SuppressFieldNotInitialized;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.base.Suppliers;
-import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Ordering;
@@ -159,10 +160,10 @@ public class SwiftLibraryDescription implements
         buildTarget);
     final ImmutableSortedSet<Flavor> buildFlavors = buildTarget.getFlavors();
     ImmutableSortedSet<BuildRule> filteredExtraDeps =
-        FluentIterable.from(params.getExtraDeps().get())
+        params.getExtraDeps().get().stream()
             .filter(input -> !input.getBuildTarget().getUnflavoredBuildTarget()
                 .equals(buildTarget.getUnflavoredBuildTarget()))
-            .toSortedSet(Ordering.natural());
+            .collect(MoreCollectors.toImmutableSortedSet(Ordering.natural()));
     params = params.copyWithExtraDeps(Suppliers.ofInstance(filteredExtraDeps));
 
     if (!buildFlavors.contains(SWIFT_COMPANION_FLAVOR) && platform.isPresent()) {
@@ -203,7 +204,7 @@ public class SwiftLibraryDescription implements
                 flavoredLinkerMapMode);
           case STATIC:
           case MACH_O_BUNDLE:
-          // TODO(tho@uber.com) create build rule for other types.
+          // TODO(nguyentruongtho) create build rule for other types.
         }
         throw new RuntimeException("unhandled library build type");
       }
@@ -226,29 +227,42 @@ public class SwiftLibraryDescription implements
               .collect(MoreCollectors.toImmutableSet()));
 
       params = params.appendExtraDeps(
-          FluentIterable.from(params.getDeps())
-              .filter(CxxLibrary.class)
-              .transform(input -> {
+          params.getDeps().stream()
+              .filter(CxxLibrary.class::isInstance)
+              .map(input -> {
                 BuildTarget companionTarget = input.getBuildTarget().withAppendedFlavors(
                     SWIFT_COMPANION_FLAVOR);
                 return resolver.getRuleOptional(companionTarget)
                     .map(requireSwiftCompile);
               })
               .filter(Optional::isPresent)
-              .transform(Optional::get)
-              .toSortedSet(Ordering.natural()));
+              .map(Optional::get)
+              .collect(MoreCollectors.toImmutableSet()));
 
-      return new SwiftCompile(
+      UnflavoredBuildTarget unflavoredBuildTarget =
+          params.getBuildTarget().getUnflavoredBuildTarget();
+
+      for (HeaderVisibility headerVisibility : HeaderVisibility.values()) {
+        // unflavoredBuildTarget because #headers can collide with any other flavor
+        // from the same domain.
+        CxxDescriptionEnhancer.requireHeaderSymlinkTree(
+            params.copyWithBuildTarget(BuildTarget.builder(unflavoredBuildTarget).build()),
+            resolver,
+            cxxPlatform,
+            args.headersSearchPath,
+            headerVisibility,
+            true);
+      }
+
+      return SwiftCompile.of(
           cxxPlatform,
           swiftBuckConfig,
           params,
+          resolver,
           new SourcePathResolver(new SourcePathRuleFinder(resolver)),
           swiftPlatform.get().getSwift(),
           args.frameworks,
           args.moduleName.orElse(buildTarget.getShortName()),
-          BuildTargets.getGenPath(
-              params.getProjectFilesystem(),
-              buildTarget, "%s"),
           args.srcs,
           args.compilerFlags,
           args.enableObjcInterop,
@@ -292,34 +306,40 @@ public class SwiftLibraryDescription implements
     SwiftRuntimeNativeLinkable swiftRuntimeLinkable =
         new SwiftRuntimeNativeLinkable(swiftPlatform);
 
-    NativeLinkableInput.Builder inputBuilder = NativeLinkableInput.builder()
-        .from(swiftRuntimeLinkable.getNativeLinkableInput(
-                cxxPlatform, Linker.LinkableDepType.SHARED));
     BuildTarget requiredBuildTarget = buildTarget
         .withoutFlavors(CxxDescriptionEnhancer.SHARED_FLAVOR)
         .withoutFlavors(LinkerMapMode.FLAVOR_DOMAIN.getFlavors())
         .withAppendedFlavors(SWIFT_COMPILE_FLAVOR);
     SwiftCompile rule = (SwiftCompile) resolver.requireRule(requiredBuildTarget);
-    inputBuilder.addAllArgs(rule.getLinkArgs());
-    return resolver.addToIndex(CxxLinkableEnhancer.createCxxLinkableBuildRule(
-        cxxBuckConfig,
-        cxxPlatform,
-        LinkerMapMode.restoreLinkerMapModeFlavorInParams(params, flavoredLinkerMapMode),
-        resolver,
-        sourcePathResolver,
-        ruleFinder,
-        buildTarget,
-        Linker.LinkType.SHARED,
-        Optional.of(sharedLibrarySoname),
-        sharedLibOutput,
-        Linker.LinkableDepType.SHARED,
-        FluentIterable.from(params.getDeps())
-            .filter(NativeLinkable.class)
-            .append(swiftRuntimeLinkable),
-        Optional.empty(),
-        Optional.empty(),
-        ImmutableSet.of(),
-        inputBuilder.build()));
+    NativeLinkableInput.Builder inputBuilder = NativeLinkableInput.builder()
+        .from(swiftRuntimeLinkable.getNativeLinkableInput(
+            cxxPlatform, Linker.LinkableDepType.SHARED))
+        .addAllArgs(rule.getAstLinkArgs())
+        .addAllArgs(rule.getFileListLinkArgs());
+    return resolver.addToIndex(
+        CxxLinkableEnhancer.createCxxLinkableBuildRule(
+            cxxBuckConfig,
+            cxxPlatform,
+            LinkerMapMode.restoreLinkerMapModeFlavorInParams(params, flavoredLinkerMapMode),
+            resolver,
+            sourcePathResolver,
+            ruleFinder,
+            buildTarget,
+            Linker.LinkType.SHARED,
+            Optional.of(sharedLibrarySoname),
+            sharedLibOutput,
+            Linker.LinkableDepType.SHARED,
+            ImmutableSet.<NativeLinkable>builder()
+                .addAll(params.getDeps().stream()
+                    .filter(NativeLinkable.class::isInstance)
+                    .map(NativeLinkable.class::cast)
+                    .collect(MoreCollectors.toImmutableSet()))
+                .add(swiftRuntimeLinkable)
+                .build(),
+            Optional.empty(),
+            Optional.empty(),
+            ImmutableSet.of(),
+            inputBuilder.build()));
   }
 
   public <A extends CxxLibraryDescription.Arg> Optional<BuildRule> createCompanionBuildRule(
@@ -370,6 +390,7 @@ public class SwiftLibraryDescription implements
     public Optional<SourcePath> bridgingHeader;
     public ImmutableSortedSet<BuildTarget> deps = ImmutableSortedSet.of();
     public Optional<NativeLinkable.Linkage> preferredLinkage;
+    public ImmutableMap<Path, SourcePath> headersSearchPath = ImmutableMap.of();
   }
 
 }
