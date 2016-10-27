@@ -37,6 +37,7 @@ import com.facebook.buck.model.Flavor;
 import com.facebook.buck.model.ImmutableFlavor;
 import com.facebook.buck.parser.NoSuchBuildTargetException;
 import com.facebook.buck.rules.AbstractBuildRuleWithResolver;
+import com.facebook.buck.rules.AbstractBuildRuleWithResolver;
 import com.facebook.buck.rules.AddToRuleKey;
 import com.facebook.buck.rules.BuildContext;
 import com.facebook.buck.rules.BuildRule;
@@ -440,7 +441,9 @@ class SwiftCompile
           swiftCompiler,
           frameworkPaths,
           moduleName,
-          Optional.of(srcs.iterator().next()),
+          srcs.isEmpty() ?
+              Optional.empty() :
+              Optional.of(srcs.iterator().next()),
           compilerFlags,
           enableObjcInterop,
           bridgingHeader,
