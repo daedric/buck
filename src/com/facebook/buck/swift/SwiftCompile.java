@@ -233,7 +233,7 @@ class SwiftCompile
           objectPath.toString());
     } else {
       compilerCommand.add(
-          "-o",
+          "-emit-module-path",
           modulePath.toString());
     }
 
