@@ -391,7 +391,8 @@ class SwiftCompile
       // create swift compile for every single file
       for (SourcePath src : srcs) {
         String outputName = CxxFlavorSanitizer.sanitize(
-            sourcePathResolver.getAbsolutePath(src).getFileName() + ".o");
+            sourcePathResolver.getAbsolutePath(src) + ".o");
+
         BuildRuleParams newParams = params.withFlavor(
             ImmutableFlavor.of(
                 COMPILE_FLAVOR_PREFIX + outputName));
