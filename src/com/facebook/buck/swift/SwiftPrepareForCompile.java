@@ -19,7 +19,6 @@ package com.facebook.buck.swift;
 import com.facebook.buck.cxx.CxxWriteArgsToFileStep;
 import com.facebook.buck.cxx.HeaderSymlinkTree;
 import com.facebook.buck.model.BuildTargets;
-import com.facebook.buck.rules.AbstractBuildRule;
 import com.facebook.buck.rules.AbstractBuildRuleWithResolver;
 import com.facebook.buck.rules.BuildContext;
 import com.facebook.buck.rules.BuildRuleParams;

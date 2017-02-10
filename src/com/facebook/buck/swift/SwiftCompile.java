@@ -37,7 +37,6 @@ import com.facebook.buck.model.Flavor;
 import com.facebook.buck.model.ImmutableFlavor;
 import com.facebook.buck.parser.NoSuchBuildTargetException;
 import com.facebook.buck.rules.AbstractBuildRuleWithResolver;
-import com.facebook.buck.rules.AbstractBuildRuleWithResolver;
 import com.facebook.buck.rules.AddToRuleKey;
 import com.facebook.buck.rules.BuildContext;
 import com.facebook.buck.rules.BuildRule;
@@ -63,7 +62,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Suppliers;
-import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -71,6 +69,7 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -118,7 +117,7 @@ class SwiftCompile
   private final boolean enableObjcInterop;
   private final SwiftBuckConfig swiftBuckConfig;
   private final Optional<Path> fileListPath;
-  private final Iterable<CxxPreprocessorInput> cxxPreprocessorInputs;
+  private final Collection<CxxPreprocessorInput> cxxPreprocessorInputs;
 
   private SwiftCompile(
       CxxPlatform cxxPlatform,
@@ -222,11 +221,20 @@ class SwiftCompile
 
     compilerCommand.addAll(MoreIterables.zipAndConcat(
         Iterables.cycle(INCLUDE_FLAG),
-        FluentIterable.from(getDeps())
-            .filter(SwiftCompile.class)
-            .transform(SourcePaths.getToBuildTargetSourcePath())
-            .transform(input -> resolver.getAbsolutePath(input).toString())
-            .toSet()));
+        getDeps().stream()
+            .filter(SwiftCompile.class::isInstance)
+            .map(SwiftCompile.class::cast)
+            .map(SourcePaths.getToBuildTargetSourcePath()::apply)
+            .map(input -> resolver.getAbsolutePath(input).toString())
+            .collect(MoreCollectors.toImmutableSet())));
+
+    compilerCommand.addAll(MoreIterables.zipAndConcat(
+        Iterables.cycle(INCLUDE_FLAG),
+        cxxPreprocessorInputs.stream()
+            .flatMap(input -> input.getIncludes().stream())
+            .map(input -> input.getRoot())
+            .map(input -> getResolver().getAbsolutePath(input).toString())
+            .collect(MoreCollectors.toImmutableSet())));
 
     Optional<Iterable<String>> configFlags = swiftBuckConfig.getFlags();
     if (configFlags.isPresent()) {
@@ -389,6 +397,7 @@ class SwiftCompile
       ImmutableSortedSet.Builder<BuildRule> deps = ImmutableSortedSet.naturalOrder();
       deps.addAll(params.getDeclaredDeps().get());
       // create swift compile for every single file
+
       for (SourcePath src : srcs) {
         String outputName = CxxFlavorSanitizer.sanitize(
             sourcePathResolver.getAbsolutePath(src) + ".o");

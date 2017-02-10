@@ -57,6 +57,14 @@ class SwiftDescriptions {
       BuildTarget buildTarget) {
 
     output.srcs = filterSwiftSources(sourcePathResolver, args.srcs);
+    // Not used and harmful as it creates a reverse map path -> filename
+    // and we do have multiple names for a single path
+    // Also headersSearchPath is never used.
+    //output.headersSearchPath = FluentIterable.from(args.exportedHeaders.getPaths())
+    //    .uniqueIndex(path -> {
+    //     Preconditions.checkArgument(path instanceof PathSourcePath);
+    //      return ((PathSourcePath) path).getRelativePath();
+    //    });
     if (args instanceof HasSwiftCompilerFlags) {
       output.compilerFlags = ((HasSwiftCompilerFlags) args).getSwiftCompilerFlags();
     } else {

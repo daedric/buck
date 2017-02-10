@@ -64,6 +64,7 @@ import org.hamcrest.Matchers;
 import org.junit.Test;
 
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -111,13 +112,12 @@ public class PrebuiltCxxLibraryDescriptionTest {
             .build());
   }
 
-  private static ImmutableSet<Path> getHeaderNames(Iterable<CxxHeaders> includes) {
-    ImmutableSet.Builder<Path> names = ImmutableSet.builder();
-    for (CxxHeaders headers : includes) {
-      CxxSymlinkTreeHeaders symlinkTreeHeaders = (CxxSymlinkTreeHeaders) headers;
-      names.addAll(symlinkTreeHeaders.getNameToPathMap().keySet());
-    }
-    return names.build();
+  private static ImmutableSet<Path> getHeaderNames(Collection<CxxHeaders> includes) {
+    return includes.stream()
+        .filter(CxxSymlinkTreeHeaders.class::isInstance)
+        .map(CxxSymlinkTreeHeaders.class::cast)
+        .flatMap(input -> input.getNameToPathMap().keySet().stream())
+        .collect(MoreCollectors.toImmutableSet());
   }
 
   @Test
