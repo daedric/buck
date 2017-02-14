@@ -62,6 +62,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Suppliers;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -115,13 +116,11 @@ class SwiftCompile
 
   private final boolean hasMainEntry;
   private final boolean enableObjcInterop;
-  private final SwiftBuckConfig swiftBuckConfig;
   private final Optional<Path> fileListPath;
   private final Collection<CxxPreprocessorInput> cxxPreprocessorInputs;
 
   private SwiftCompile(
       CxxPlatform cxxPlatform,
-      SwiftBuckConfig swiftBuckConfig,
       BuildRuleParams params,
       SourcePathResolver resolver,
       Tool swiftCompiler,
@@ -135,7 +134,6 @@ class SwiftCompile
     super(params, resolver);
     this.cxxPlatform = cxxPlatform;
     this.frameworks = frameworks;
-    this.swiftBuckConfig = swiftBuckConfig;
     this.fileListPath = fileListPath;
     this.cxxPreprocessorInputs =
         CxxPreprocessables.getTransitiveCxxPreprocessorInput(cxxPlatform, params.getDeps());
@@ -214,6 +212,7 @@ class SwiftCompile
             .flatMap(searchPath -> ImmutableSet.of("-F", searchPath.toString()).stream())
             .iterator());
 
+    compilerCommand.addAll(compilerFlags);
     compilerCommand.addAll(
         MoreIterables.zipAndConcat(
             Iterables.cycle("-Xcc"),
@@ -236,10 +235,6 @@ class SwiftCompile
             .map(input -> getResolver().getAbsolutePath(input).toString())
             .collect(MoreCollectors.toImmutableSet())));
 
-    Optional<Iterable<String>> configFlags = swiftBuckConfig.getFlags();
-    if (configFlags.isPresent()) {
-      compilerCommand.addAll(configFlags.get());
-    }
 
     if (bridgingHeader.isPresent()) {
       compilerCommand.add(
@@ -382,9 +377,19 @@ class SwiftCompile
       ImmutableSortedSet<FrameworkPath> frameworkPaths,
       String moduleName,
       ImmutableSet<SourcePath> srcs,
-      ImmutableList<String> compilerFlags,
+      ImmutableList<String> ruleCompilerFlags,
       Optional<Boolean> enableObjcInterop,
       Optional<SourcePath> bridgingHeader) throws NoSuchBuildTargetException {
+
+    ImmutableList<String> compilerFlags;
+    Optional<Iterable<String>> configFlags = swiftBuckConfig.getFlags();
+    if (configFlags.isPresent()) {
+      compilerFlags = FluentIterable
+          .from(ruleCompilerFlags)
+          .append(configFlags.get()).toList();
+    } else {
+      compilerFlags = ruleCompilerFlags;
+    }
 
     if (srcs.size() > 1) {
       BuildRuleParams prepareForCompileParams = params.withFlavor(PREPARE_FLAVOR);
@@ -408,7 +413,6 @@ class SwiftCompile
         BuildRule compileSingleFile =
             new SwiftCompile(
                 cxxPlatform,
-                swiftBuckConfig,
                 newParams,
                 sourcePathResolver,
                 swiftCompiler,
@@ -426,7 +430,6 @@ class SwiftCompile
       // for merging all single file build outputs
       return new SwiftCompile(
           cxxPlatform,
-          swiftBuckConfig,
           params.copyWithDeps(
               Suppliers.ofInstance(deps.build()),
               params.getExtraDeps()),
@@ -442,7 +445,6 @@ class SwiftCompile
     } else {
       return new SwiftCompile(
           cxxPlatform,
-          swiftBuckConfig,
           params,
           sourcePathResolver,
           swiftCompiler,
